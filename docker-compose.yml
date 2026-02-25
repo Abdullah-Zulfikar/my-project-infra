@@ -1,0 +1,189 @@
+# Docker Compose - Full Stack Classifieds Marketplace
+# Usage: docker-compose up -d
+
+services:
+  # ===================
+  # MongoDB Database
+  # ===================
+  mongodb:
+    image: mongo:7.0
+    container_name: classifieds-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Redis (for Celery)
+  # ===================
+  redis:
+    image: redis:7-alpine
+    container_name: classifieds-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Backend (FastAPI)
+  # ===================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: classifieds-backend
+    restart: unless-stopped
+    environment:
+      - MONGO_URL=mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017
+      - DB_NAME=${DB_NAME:-classifieds}
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - REDIS_URL=redis://redis:6379/0
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mock}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@classifieds.com}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL:-http://localhost}
+      - ENABLE_DUAL_VERIFICATION=${ENABLE_DUAL_VERIFICATION:-true}
+      - ENABLE_KYC=${ENABLE_KYC:-true}
+      - ENABLE_WEBSOCKET_CHAT=${ENABLE_WEBSOCKET_CHAT:-true}
+      - ENABLE_SAVED_SEARCHES=${ENABLE_SAVED_SEARCHES:-true}
+    volumes:
+      - backend_uploads:/app/uploads
+    ports:
+      - "8001:8001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Frontend (React + Nginx)
+  # ===================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ${PUBLIC_APP_URL:-http://localhost}
+    container_name: classifieds-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Celery Worker (Background Jobs)
+  # ===================
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: classifieds-celery-worker
+    restart: unless-stopped
+    command: celery -A celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - MONGO_URL=mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017
+      - DB_NAME=${DB_NAME:-classifieds}
+      - REDIS_URL=redis://redis:6379/0
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mock}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@classifieds.com}
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL:-http://localhost}
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Celery Beat (Scheduled Tasks)
+  # ===================
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: classifieds-celery-beat
+    restart: unless-stopped
+    command: celery -A celery_app beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - classifieds-network
+
+  # ===================
+  # Nginx Reverse Proxy (Production)
+  # ===================
+  nginx:
+    image: nginx:alpine
+    container_name: classifieds-nginx
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - classifieds-network
+    profiles:
+      - production
+
+# ===================
+# Volumes
+# ===================
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+# ===================
+# Networks
+# ===================
+networks:
+  classifieds-network:
+    driver: bridge
