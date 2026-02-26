@@ -130,9 +130,7 @@ services:
   # Celery Beat (Scheduled Tasks)
   # ===================
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: 987137006032.dkr.ecr.eu-north-1.amazonaws.com/classifieds-backend:latest
     container_name: classifieds-celery-beat
     restart: unless-stopped
     command: celery -A celery_app beat --loglevel=info
