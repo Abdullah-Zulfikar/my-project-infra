@@ -99,9 +99,7 @@ services:
   # Celery Worker (Background Jobs)
   # ===================
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: 987137006032.dkr.ecr.eu-north-1.amazonaws.com/classifieds-backend:latest
     container_name: classifieds-celery-worker
     restart: unless-stopped
     command: celery -A celery_app worker --loglevel=info --concurrency=2
