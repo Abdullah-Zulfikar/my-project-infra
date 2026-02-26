@@ -49,6 +49,8 @@ services:
   # ===================
   backend:
     image: 987137006032.dkr.ecr.eu-north-1.amazonaws.com/classifieds-backend:latest
+    env_file:
+      - ./backend/.env
     container_name: classifieds-backend
     restart: unless-stopped
     environment:
@@ -86,6 +88,8 @@ services:
   # ===================
   frontend:
     image: 987137006032.dkr.ecr.eu-north-1.amazonaws.com/classifieds-frontend:latest
+    env_file:
+      - ./frontend/.env
     container_name: classifieds-frontend
     restart: unless-stopped
     ports:
